@@ -1,0 +1,6 @@
+target/
+obj/
+.deps/
+*.img
+log.txt
+qemu_stdout.txt
