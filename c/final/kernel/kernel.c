@@ -370,10 +370,7 @@ void exception(x86_64_registers* reg) {
                 if ((reg->reg_err & PFERR_USER) && missing && in_heap) {
                     // Optimistic/lazy allocation: `sbrk`/`brk` already
                     // moved the break to cover this address, but never
-                    // mapped a page for it (growth never eagerly maps
-                    // memory) -- this is the expected first-touch fault.
-                    // Map one page and resume; if no physical page is
-                    // available, kill the process instead (per spec).
+                    // mapped a page for it.
                     uintptr_t page_addr = ROUNDDOWN(addr, PAGESIZE);
                     void* pa = palloc(current->p_pid);
                     if (pa != NULL && virtual_memory_map(current->p_pagetable, page_addr,
