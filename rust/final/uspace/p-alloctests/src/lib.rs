@@ -1,15 +1,3 @@
-// p-alloctests.rs (ported from uspace/p-alloctests.c)
-//
-//    Simple correctness checks on the malloc library -- realloc
-//    preserves contents, calloc zeroes memory, heap_info reports
-//    allocations in descending size order -- followed by a
-//    page-at-a-time allocation loop that reports timing. Run via boot
-//    command "alloctests" or by pressing 'c' once WeensyOS is running.
-//
-//    Initially (before uspace/malloc is implemented) `malloc` always
-//    returns `None`; unlike the reference C, which would dereference a
-//    NULL pointer straight into undefined behavior, unwrapping that
-//    `Option` here fails as a clean, readable panic instead.
 #![no_std]
 #![no_main]
 
@@ -24,51 +12,68 @@ fn rdtsc() -> u64 {
     ((hi as u64) << 32) | (lo as u64)
 }
 
+fn as_raw(ptr: Option<core::ptr::NonNull<u8>>) -> *mut u8 {
+    ptr.map_or(core::ptr::null_mut(), |p| p.as_ptr())
+}
+
 #[no_mangle]
 pub extern "C" fn process_main() -> ! {
     let p = getpid();
 
-    // Alloc an int array of 10 elements, fill it in.
-    let array_ptr = malloc(4 * 10).expect("malloc(40) failed").as_ptr() as *mut i32;
-    let array = unsafe { core::slice::from_raw_parts_mut(array_ptr, 10) };
-    for (i, slot) in array.iter_mut().enumerate() {
-        *slot = i as i32;
+    // alloc int array of 10 elements
+    let array_addr = as_raw(malloc(4 * 10)) as usize;
+
+    // set array elements
+    for i in 0..10usize {
+        unsafe { *((array_addr + i * 4) as *mut i32) = i as i32 };
     }
 
-    // Realloc to 20 elements; contents up to the old size must survive.
-    let array_ptr = unsafe {
-        core::ptr::NonNull::new(array_ptr as *mut u8)
-            .and_then(|p| realloc(Some(p), 4 * 20))
-            .expect("realloc failed")
-            .as_ptr() as *mut i32
-    };
-    let array = unsafe { core::slice::from_raw_parts(array_ptr, 20) };
-    for (i, &v) in array.iter().enumerate().take(10) {
+    // realloc array to size 20
+    let array_addr = as_raw(unsafe { realloc(core::ptr::NonNull::new(array_addr as *mut u8), 4 * 20) }) as usize;
+
+    // check if contents are same
+    for i in 0..10usize {
+        let v = unsafe { *((array_addr + i * 4) as *const i32) };
         assert_eq!(v, i as i32);
     }
+    let array_ptr = array_addr as *mut i32;
 
-    // Alloc a 30-element int array via calloc; must be zeroed.
-    let array2_ptr = calloc(30, 4).expect("calloc(30, 4) failed").as_ptr() as *mut i32;
-    let array2 = unsafe { core::slice::from_raw_parts(array2_ptr, 30) };
-    for &v in array2 {
+    // alloc int array of size 30 using calloc
+    let array2_addr = as_raw(calloc(30, 4)) as usize;
+
+    // assert array[i] == 0
+    for i in 0..30usize {
+        let v = unsafe { *((array2_addr + i * 4) as *const i32) };
         assert_eq!(v, 0);
     }
+    let array2_ptr = array2_addr as *mut i32;
 
-    let mut info = HeapInfoStruct { num_allocs: 0, size_array: core::ptr::null_mut(), ptr_array: core::ptr::null_mut(), free_space: 0, largest_free_chunk: 0 };
+    let mut info = HeapInfoStruct {
+        num_allocs: 0,
+        size_array: core::ptr::null_mut(),
+        ptr_array: core::ptr::null_mut(),
+        free_space: 0,
+        largest_free_chunk: 0,
+    };
+    
     if heap_info(&mut info) == 0 {
-        // Allocations must come back in strictly descending size order.
-        let sizes = unsafe { core::slice::from_raw_parts(info.size_array, info.num_allocs as usize) };
-        for i in 1..sizes.len() {
-            assert!(sizes[i] < sizes[i - 1]);
+        app_printf!(0, "heap_info: num_allocs={} free_space={} largest_free_chunk={}\n", info.num_allocs, info.free_space, info.largest_free_chunk);
+        for i in 0..info.num_allocs as usize {
+            let sz = unsafe { *info.size_array.add(i) };
+            app_printf!(0, "  alloc[{}]: size={}\n", i, sz);
         }
-        unsafe {
-            free(core::ptr::NonNull::new(info.size_array as *mut u8));
-            free(core::ptr::NonNull::new(info.ptr_array as *mut u8));
+
+        // check if allocations are in sorted order
+        for i in 1..info.num_allocs as usize {
+            let a = unsafe { *info.size_array.add(i) };
+            let b = unsafe { *info.size_array.add(i - 1) };
+            assert!(a < b);
         }
     } else {
         app_printf!(0, "heap_info failed\n");
     }
 
+    // free array, array2
     unsafe {
         free(core::ptr::NonNull::new(array_ptr as *mut u8));
         free(core::ptr::NonNull::new(array2_ptr as *mut u8));
@@ -77,7 +82,7 @@ pub extern "C" fn process_main() -> ! {
     let mut total_time: u64 = 0;
     let mut total_pages: u64 = 0;
 
-    // Allocate pages until out of memory, timing each allocation.
+    // allocate pages till no more memory
     loop {
         let start = rdtsc();
         let ptr = malloc(PAGESIZE);
@@ -93,6 +98,7 @@ pub extern "C" fn process_main() -> ! {
 
     app_printf!(p, "Total_time taken to alloc: {} Average time: {}\n", total_time, total_time / total_pages.max(1));
 
+    // after running out of memory
     loop {
         r#yield();
     }

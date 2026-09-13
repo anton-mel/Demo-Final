@@ -1,12 +1,3 @@
-// p-malloc.rs (ported from uspace/p-malloc.c)
-//
-//    Allocates one page at a time via `malloc` until it fails, writing
-//    to each new page to confirm it's actually accessible. Run via boot
-//    command "malloc" or by pressing 'm' once WeensyOS is running.
-//
-//    Initially (before uspace/malloc is implemented) this does nothing
-//    at all, since `malloc` always returns `None`, matching the
-//    reference starter's own documented behavior.
 #![no_std]
 #![no_main]
 

@@ -1,15 +1,6 @@
-// kernel.rs (ported from kernel/kernel.c + kernel/kernel.h)
+// kernel.rs
 //
 //    This is the kernel.
-//
-//    This is the CS3230 *final project* starter (brk/sbrk + user-space
-//    malloc, layered on top of a complete WeensyOS Project 5), not
-//    Project 5 itself -- see uspace/malloc for the actual pset TODOs.
-//    Process creation/fork/exit/page-alloc are themselves given here,
-//    provided in compiled form as kernel/k-vm.o (no source available),
-//    exactly like the C starter: this file calls them through a small
-//    `extern "C"` boundary instead of reimplementing logic nobody has
-//    the spec for.
 
 use crate::hardware::{check_keyboard, console_show_cursor, default_exception, hardware_init, process_init, timer_init};
 use crate::vm::{kernel_pagetable, set_pagetable, virtual_memory_lookup, virtual_memory_map};
@@ -242,24 +233,16 @@ unsafe fn process_setup(pid: i32, program_number: i32) {
 // sbrk(p, difference)
 //    Adjusts `p`'s program break by `difference` bytes. Returns 0 on
 //    success and -1 on error.
-//
-//    Growth is optimistic/lazy: only the break itself moves here; the
-//    actual page gets mapped on first touch, in INT_PAGEFAULT below.
-//    Shrinking unmaps and frees affected pages immediately, since we
-//    already know for certain the process can never touch them again.
+
 unsafe fn sbrk(p: &mut Proc, difference: i64) -> i32 {
     let new_break = (p.program_break as i64 + difference) as u64;
-    // Valid range: never below where the heap started, and never at or
-    // past the fixed top-of-stack page (MEMSIZE_VIRTUAL - PAGESIZE),
-    // which this assignment assumes never grows.
+
+    // valid range
     if new_break < p.original_break || new_break >= MEMSIZE_VIRTUAL - PAGESIZE {
         return -1;
     }
 
     if difference < 0 {
-        // Only pages that no longer overlap [original_break, new_break)
-        // at all get freed -- the page straddling `new_break` itself
-        // (when it's not page-aligned) still holds live heap bytes.
         let old_top = round_up(p.program_break, PAGESIZE);
         let new_top = round_up(new_break, PAGESIZE);
         let mut va = new_top;
@@ -433,8 +416,6 @@ pub unsafe extern "C" fn exception(reg: *mut X86_64Registers) {
             schedule(); /* will not be reached */
         }
 
-        // `addr` is an absolute address for brk, a relative increment
-        // for sbrk; sbrk() itself only ever deals in the relative form.
         INT_SYS_BRK => {
             let addr = (*CURRENT).p_registers.reg_rdi;
             let difference = addr as i64 - (*CURRENT).program_break as i64;
@@ -449,9 +430,6 @@ pub unsafe extern "C" fn exception(reg: *mut X86_64Registers) {
 
         INT_SYS_PAGE_ALLOC => {
             let addr = (*CURRENT).p_registers.reg_rdi;
-            // Matches the reference starter exactly: the result is not
-            // stored into reg_rax here (given code, not something this
-            // assignment asks you to touch).
             syscall_page_alloc(&mut *CURRENT, addr);
         }
 
@@ -474,11 +452,6 @@ pub unsafe extern "C" fn exception(reg: *mut X86_64Registers) {
                 panic!("Kernel page fault for {:#x} ({} {}, rip={:#x})!", addr, operation, problem, (*reg).reg_rip);
             }
 
-            // Part 1, optimistic/lazy allocation: a *missing* page (not
-            // a protection problem) inside this process's own heap
-            // range is expected, not an error -- it just means the page
-            // sbrk already promised hasn't been backed by physical
-            // memory yet. Back it now and let the process continue.
             if (*reg).reg_err & PFERR_PRESENT == 0 && addr >= (*CURRENT).original_break && addr < (*CURRENT).program_break {
                 let page_va = round_down(addr, PAGESIZE);
                 let pa = palloc((*CURRENT).p_pid);
@@ -487,9 +460,7 @@ pub unsafe extern "C" fn exception(reg: *mut X86_64Registers) {
                     // re-run the process below, retrying the faulting
                     // instruction against the now-mapped page.
                 } else {
-                    // Out of physical memory: per the spec, kill the
-                    // process rather than loop faulting forever.
-                    console_printf(cpos(24, 0), 0x0C00, format_args!("Process {} killed: out of memory for heap growth\n", (*CURRENT).p_pid));
+                    console_printf(cpos(24, 0), 0x0C00, format_args!("Out of physical memory!\n"));
                     (*CURRENT).p_state = P_BROKEN;
                     syscall_exit(&mut *CURRENT);
                 }
