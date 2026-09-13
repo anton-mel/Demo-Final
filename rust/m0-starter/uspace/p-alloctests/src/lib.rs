@@ -6,10 +6,13 @@
 //    page-at-a-time allocation loop that reports timing. Run via boot
 //    command "alloctests" or by pressing 'c' once WeensyOS is running.
 //
-//    Initially (before uspace/malloc is implemented) `malloc` always
-//    returns `None`; unlike the reference C, which would dereference a
-//    NULL pointer straight into undefined behavior, unwrapping that
-//    `Option` here fails as a clean, readable panic instead.
+//    Matches the reference C exactly, including its lack of any NULL
+//    check on malloc/calloc/realloc's result before writing through
+//    it: initially (before uspace/malloc is implemented), those all
+//    return null, so the very first write below faults -- the same
+//    hardware page fault C gets from the same unchecked null deref,
+//    not a Rust-side panic (which would be a *different*, safer-looking
+//    failure this starter deliberately does not paper over).
 #![no_std]
 #![no_main]
 
@@ -24,31 +27,34 @@ fn rdtsc() -> u64 {
     ((hi as u64) << 32) | (lo as u64)
 }
 
+/// `Option<NonNull<u8>>` -> possibly-null raw pointer, with no check --
+/// the direct Rust equivalent of C handing back a `void*` that might be
+/// NULL and trusting the caller to look at it (which this file's whole
+/// point is to faithfully *not* do, matching the reference).
+fn as_raw(ptr: Option<core::ptr::NonNull<u8>>) -> *mut u8 {
+    ptr.map_or(core::ptr::null_mut(), |p| p.as_ptr())
+}
+
 #[no_mangle]
 pub extern "C" fn process_main() -> ! {
     let p = getpid();
 
     // Alloc an int array of 10 elements, fill it in.
-    let array_ptr = malloc(4 * 10).expect("malloc(40) failed").as_ptr() as *mut i32;
+    let array_ptr = as_raw(malloc(4 * 10)) as *mut i32;
     let array = unsafe { core::slice::from_raw_parts_mut(array_ptr, 10) };
     for (i, slot) in array.iter_mut().enumerate() {
         *slot = i as i32;
     }
 
     // Realloc to 20 elements; contents up to the old size must survive.
-    let array_ptr = unsafe {
-        core::ptr::NonNull::new(array_ptr as *mut u8)
-            .and_then(|p| realloc(Some(p), 4 * 20))
-            .expect("realloc failed")
-            .as_ptr() as *mut i32
-    };
+    let array_ptr = as_raw(unsafe { realloc(core::ptr::NonNull::new(array_ptr as *mut u8), 4 * 20) }) as *mut i32;
     let array = unsafe { core::slice::from_raw_parts(array_ptr, 20) };
     for (i, &v) in array.iter().enumerate().take(10) {
         assert_eq!(v, i as i32);
     }
 
     // Alloc a 30-element int array via calloc; must be zeroed.
-    let array2_ptr = calloc(30, 4).expect("calloc(30, 4) failed").as_ptr() as *mut i32;
+    let array2_ptr = as_raw(calloc(30, 4)) as *mut i32;
     let array2 = unsafe { core::slice::from_raw_parts(array2_ptr, 30) };
     for &v in array2 {
         assert_eq!(v, 0);
