@@ -1,0 +1,21 @@
+[package]
+name = "weensyos_malloc"
+version = "0.1.0"
+authors = ["Anton Melnychuk <anton.melnychuk@yale.edu>"]
+edition = "2021"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+weensyos-shared = { path = "../../shared/rust" }
+weensyos-process = { path = "../process" }
+
+[profile.dev]
+panic = "abort"
+opt-level = 1
+
+[profile.release]
+panic = "abort"
+opt-level = 1
+codegen-units = 1

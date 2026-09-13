@@ -1,0 +1,22 @@
+[package]
+name = "p_alloctests"
+version = "0.1.0"
+authors = ["Anton Melnychuk <anton.melnychuk@yale.edu>"]
+edition = "2021"
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+weensyos-shared = { path = "../../shared/rust" }
+weensyos-process = { path = "../process" }
+weensyos_malloc = { path = "../malloc" }
+
+[profile.dev]
+panic = "abort"
+opt-level = 1
+
+[profile.release]
+panic = "abort"
+opt-level = 1
+codegen-units = 1
