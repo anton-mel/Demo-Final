@@ -6,7 +6,7 @@ use crate::elf::*;
 use crate::kernel::Proc;
 use crate::vm::{kernel_pagetable, set_pagetable, virtual_memory_lookup, virtual_memory_map};
 use crate::x86_64::{PAGESIZE, PTE_P, PTE_U, PTE_W};
-use weensyos_shared::{cpos, console_printf};
+use weensyos_shared::{cpos, console_printf, round_up};
 
 // palloc(pid)
 //    Given (kernel/k-vm.o, no source available): allocates a page from
@@ -75,9 +75,10 @@ pub unsafe extern "C" fn program_load(p: &mut Proc, programnumber: i32) -> i32 {
     assert!((*eh).e_magic == ELF_MAGIC);
 
     // load each loadable program segment into memory, tracking the
-    // highest address any of them reaches
-    let mut max_end_mem = 0u64;
+    // highest address any of them reaches -- the heap starts right
+    // after that, per the assignment spec's Part 1.
     let ph = (eh as *const u8).add((*eh).e_phoff as usize) as *const ElfProgram;
+    let mut max_end_mem: u64 = 0;
     for i in 0..(*eh).e_phnum as isize {
         let ph_i = &*ph.offset(i);
         if ph_i.p_type == ELF_PTYPE_LOAD {
@@ -92,11 +93,10 @@ pub unsafe extern "C" fn program_load(p: &mut Proc, programnumber: i32) -> i32 {
     // set the entry point from the ELF header
     p.p_registers.reg_rip = (*eh).e_entry;
 
-    // The heap starts right after the highest address any loaded segment
-    // reaches, rounded up to a page boundary (assignment spec's Part 1,
-    // "The initial location of the break").
-    p.original_break = (max_end_mem + PAGESIZE - 1) & !(PAGESIZE - 1);
-    p.program_break = p.original_break;
+    // The heap (and the break) start on the page right after the last
+    // loaded segment; a zero-sized heap to begin with.
+    p.program_break = round_up(max_end_mem, PAGESIZE);
+    p.original_break = p.program_break;
     0
 }
 

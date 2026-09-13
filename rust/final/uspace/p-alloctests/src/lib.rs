@@ -13,7 +13,7 @@
 #![no_std]
 #![no_main]
 
-use weensyos_malloc::{calloc, free, heap_info, heap_info_free, malloc, realloc};
+use weensyos_malloc::{calloc, free, heap_info, malloc, realloc, HeapInfoStruct};
 use weensyos_process::{app_printf, getpid, r#yield};
 
 const PAGESIZE: u64 = 4096;
@@ -54,15 +54,19 @@ pub extern "C" fn process_main() -> ! {
         assert_eq!(v, 0);
     }
 
-    match heap_info() {
-        Some(info) => {
-            // Allocations must come back in strictly descending size order.
-            for i in 1..info.sizes.len() {
-                assert!(info.sizes[i] < info.sizes[i - 1]);
-            }
-            heap_info_free(info);
+    let mut info = HeapInfoStruct { num_allocs: 0, size_array: core::ptr::null_mut(), ptr_array: core::ptr::null_mut(), free_space: 0, largest_free_chunk: 0 };
+    if heap_info(&mut info) == 0 {
+        // Allocations must come back in strictly descending size order.
+        let sizes = unsafe { core::slice::from_raw_parts(info.size_array, info.num_allocs as usize) };
+        for i in 1..sizes.len() {
+            assert!(sizes[i] < sizes[i - 1]);
         }
-        None => app_printf!(0, "heap_info failed\n"),
+        unsafe {
+            free(core::ptr::NonNull::new(info.size_array as *mut u8));
+            free(core::ptr::NonNull::new(info.ptr_array as *mut u8));
+        }
+    } else {
+        app_printf!(0, "heap_info failed\n");
     }
 
     unsafe {

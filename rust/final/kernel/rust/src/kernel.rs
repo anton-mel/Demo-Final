@@ -244,31 +244,37 @@ unsafe fn process_setup(pid: i32, program_number: i32) {
 //    success and -1 on error.
 //
 //    Growth is optimistic/lazy: only the break itself moves here; the
-//    actual page doesn't get allocated until the process first touches
-//    it, via the INT_PAGEFAULT arm of exception() below. Shrinking is
-//    immediate: any now-out-of-range pages are unmapped and freed right
-//    away, so a later re-grow into the same range faults again cleanly.
+//    actual page gets mapped on first touch, in INT_PAGEFAULT below.
+//    Shrinking unmaps and frees affected pages immediately, since we
+//    already know for certain the process can never touch them again.
 unsafe fn sbrk(p: &mut Proc, difference: i64) -> i32 {
     let new_break = (p.program_break as i64 + difference) as u64;
+    // Valid range: never below where the heap started, and never at or
+    // past the fixed top-of-stack page (MEMSIZE_VIRTUAL - PAGESIZE),
+    // which this assignment assumes never grows.
     if new_break < p.original_break || new_break >= MEMSIZE_VIRTUAL - PAGESIZE {
         return -1;
     }
-    let old_break = p.program_break;
-    p.program_break = new_break;
 
     if difference < 0 {
-        let old_top = round_up(old_break, PAGESIZE);
-        let mut addr = round_up(new_break, PAGESIZE);
-        while addr < old_top {
-            let vam = virtual_memory_lookup(p.p_pagetable, addr);
+        // Only pages that no longer overlap [original_break, new_break)
+        // at all get freed -- the page straddling `new_break` itself
+        // (when it's not page-aligned) still holds live heap bytes.
+        let old_top = round_up(p.program_break, PAGESIZE);
+        let new_top = round_up(new_break, PAGESIZE);
+        let mut va = new_top;
+        while va < old_top {
+            let vam = virtual_memory_lookup(p.p_pagetable, va);
             if vam.pn >= 0 {
-                pageinfo[vam.pn as usize].owner = PO_FREE;
                 pageinfo[vam.pn as usize].refcount = 0;
-                virtual_memory_map(p.p_pagetable, addr, 0, PAGESIZE, 0);
+                pageinfo[vam.pn as usize].owner = PO_FREE;
+                virtual_memory_map(p.p_pagetable, va, 0, PAGESIZE, 0);
             }
-            addr += PAGESIZE;
+            va += PAGESIZE;
         }
     }
+
+    p.program_break = new_break;
     0
 }
 
@@ -427,8 +433,8 @@ pub unsafe extern "C" fn exception(reg: *mut X86_64Registers) {
             schedule(); /* will not be reached */
         }
 
-        // `addr` is an absolute address for brk, a relative increment for
-        // sbrk; both dispatch through the one `sbrk` above.
+        // `addr` is an absolute address for brk, a relative increment
+        // for sbrk; sbrk() itself only ever deals in the relative form.
         INT_SYS_BRK => {
             let addr = (*CURRENT).p_registers.reg_rdi;
             let difference = addr as i64 - (*CURRENT).program_break as i64;
@@ -436,9 +442,9 @@ pub unsafe extern "C" fn exception(reg: *mut X86_64Registers) {
         }
 
         INT_SYS_SBRK => {
-            let increment = (*CURRENT).p_registers.reg_rdi as i64;
+            let difference = (*CURRENT).p_registers.reg_rdi as i64;
             let old_break = (*CURRENT).program_break;
-            (*CURRENT).p_registers.reg_rax = if sbrk(&mut *CURRENT, increment) == 0 { old_break } else { u64::MAX };
+            (*CURRENT).p_registers.reg_rax = if sbrk(&mut *CURRENT, difference) == 0 { old_break } else { u64::MAX };
         }
 
         INT_SYS_PAGE_ALLOC => {
@@ -468,24 +474,26 @@ pub unsafe extern "C" fn exception(reg: *mut X86_64Registers) {
                 panic!("Kernel page fault for {:#x} ({} {}, rip={:#x})!", addr, operation, problem, (*reg).reg_rip);
             }
 
-            // Optimistic/lazy heap allocation: a fault inside
-            // [original_break, program_break) means the process just
-            // touched heap memory `sbrk` had already promised it but not
-            // yet backed with a real page -- map one now instead of
-            // killing the process. Any other fault (out-of-heap, or
-            // `palloc`/mapping failure) falls through to the kill path
-            // below, unchanged from the given starter behavior.
-            let in_heap = addr >= (*CURRENT).original_break && addr < (*CURRENT).program_break;
-            let mut handled = false;
-            if in_heap {
-                let page_addr = round_down(addr, PAGESIZE);
-                let phys = palloc((*CURRENT).p_pid);
-                if !phys.is_null() {
-                    handled = virtual_memory_map((*CURRENT).p_pagetable, page_addr, phys as u64, PAGESIZE, (PTE_P | PTE_W | PTE_U) as i32) >= 0;
+            // Part 1, optimistic/lazy allocation: a *missing* page (not
+            // a protection problem) inside this process's own heap
+            // range is expected, not an error -- it just means the page
+            // sbrk already promised hasn't been backed by physical
+            // memory yet. Back it now and let the process continue.
+            if (*reg).reg_err & PFERR_PRESENT == 0 && addr >= (*CURRENT).original_break && addr < (*CURRENT).program_break {
+                let page_va = round_down(addr, PAGESIZE);
+                let pa = palloc((*CURRENT).p_pid);
+                if !pa.is_null() && virtual_memory_map((*CURRENT).p_pagetable, page_va, pa as u64, PAGESIZE, (PTE_P | PTE_W | PTE_U) as i32) >= 0 {
+                    // Leave p_state as P_RUNNABLE and fall through to
+                    // re-run the process below, retrying the faulting
+                    // instruction against the now-mapped page.
+                } else {
+                    // Out of physical memory: per the spec, kill the
+                    // process rather than loop faulting forever.
+                    console_printf(cpos(24, 0), 0x0C00, format_args!("Process {} killed: out of memory for heap growth\n", (*CURRENT).p_pid));
+                    (*CURRENT).p_state = P_BROKEN;
+                    syscall_exit(&mut *CURRENT);
                 }
-            }
-
-            if !handled {
+            } else {
                 console_printf(
                     cpos(24, 0),
                     0x0C00,
