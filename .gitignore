@@ -3,3 +3,4 @@ obj/
 *.img
 log.txt
 qemu_stdout.txt
+target/
