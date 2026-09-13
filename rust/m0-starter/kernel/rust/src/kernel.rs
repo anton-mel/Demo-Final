@@ -243,12 +243,8 @@ unsafe fn process_setup(pid: i32, program_number: i32) {
 // sbrk(p, difference)
 //    Adjusts `p`'s program break by `difference` bytes. Returns 0 on
 //    success and -1 on error.
-//
-//    TODO: implement this. See the assignment spec's Part 1 -- growth
-//    should be optimistic/lazy (move the break only; a page gets mapped
-//    on first touch via a page fault, not here), while shrinking should
-//    unmap and free affected pages immediately.
-#[allow(unused_variables, dead_code)] // not called until INT_SYS_BRK/INT_SYS_SBRK are filled in
+
+#[allow(unused_variables, dead_code)]
 unsafe fn sbrk(p: &mut Proc, difference: i64) -> i32 {
     0
 }
@@ -408,17 +404,16 @@ pub unsafe extern "C" fn exception(reg: *mut X86_64Registers) {
             schedule(); /* will not be reached */
         }
 
-        // TODO: fill in sbrk() (above) and wire it up here. `addr` is an
-        // absolute address for brk, a relative increment for sbrk.
-        INT_SYS_BRK => {}
+        INT_SYS_BRK => {
+            // TODO : Your code here
+        }
 
-        INT_SYS_SBRK => {}
+        INT_SYS_SBRK => {
+            // TODO : Your code here
+        }
 
         INT_SYS_PAGE_ALLOC => {
             let addr = (*CURRENT).p_registers.reg_rdi;
-            // Matches the reference starter exactly: the result is not
-            // stored into reg_rax here (given code, not something this
-            // assignment asks you to touch).
             syscall_page_alloc(&mut *CURRENT, addr);
         }
 

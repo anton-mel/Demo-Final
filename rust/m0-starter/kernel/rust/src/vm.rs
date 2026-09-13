@@ -1,4 +1,4 @@
-// vm.rs (ported from kernel/vm.c)
+// vm.rs
 
 // NOTE
 // Read x86_64.rs for some useful functions and constants relevant here!
@@ -78,9 +78,6 @@ pub unsafe fn set_pagetable(pagetable: *mut X86_64Pagetable) {
 //    Returns 0 if the map succeeds, -1 if it fails (because a required
 //    page table was not allocated).
 
-// `#[no_mangle] extern "C"`: kernel/k-vm.o (precompiled, no source
-// available -- see kernel.rs) calls this by its plain C symbol name, so
-// it must be exposed exactly as C would see it, not Rust-mangled.
 #[no_mangle]
 pub unsafe extern "C" fn virtual_memory_map(pagetable: *mut X86_64Pagetable, mut va: u64, mut pa: u64, mut sz: u64, perm: i32) -> i32 {
     // sanity checks for virtual address, size, and permissions
@@ -92,7 +89,7 @@ pub unsafe extern "C" fn virtual_memory_map(pagetable: *mut X86_64Pagetable, mut
         assert!(pa.wrapping_add(sz) >= pa); // physical address range does not wrap
         assert!(pa + sz <= MEMSIZE_PHYSICAL); // physical addresses exist
     }
-    assert!(perm >= 0 && perm < 0x1000); // `perm` makes sense (perm can only be 12 bits)
+    assert!(perm >= 0 && perm < 0x1000); // perm can only be 12 bits
     assert!(pagetable as u64 % PAGESIZE == 0); // `pagetable` page-aligned
 
     let mut last_index123: i64 = -1;
@@ -122,11 +119,12 @@ pub unsafe extern "C" fn virtual_memory_map(pagetable: *mut X86_64Pagetable, mut
     0
 }
 
-// lookup_l1pagetable(pagetable, va, perm)
+// lookup_l4pagetable(pagetable, va, perm)
 //    Helper function to find the last level of `va` in `pagetable`
 //
-//    Returns a pointer to the last level pagetable if it exists and can be
-//    accessed with the given permissions. Returns null otherwise.
+//    Returns an x86_64_pagetable pointer to the last level pagetable
+//    if it exists and can be accessed with the given permissions
+//    Returns NULL otherwise
 
 unsafe fn lookup_l1pagetable(pagetable: *mut X86_64Pagetable, va: u64, perm: i32) -> *mut X86_64Pagetable {
     let mut pt = pagetable;
@@ -171,8 +169,6 @@ unsafe fn lookup_l1pagetable(pagetable: *mut X86_64Pagetable, va: u64, perm: i32
 //    Returns information about the mapping of the virtual address `va` in
 //    `pagetable`. The information is returned as a `VaMapping` object.
 
-// `#[no_mangle] extern "C"`: see virtual_memory_map's comment above --
-// kernel/k-vm.o calls this by its plain C symbol name.
 #[no_mangle]
 pub unsafe extern "C" fn virtual_memory_lookup(pagetable: *mut X86_64Pagetable, va: u64) -> VaMapping {
     let mut pt = pagetable;

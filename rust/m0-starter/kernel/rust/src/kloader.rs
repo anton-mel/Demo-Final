@@ -1,4 +1,4 @@
-// kloader.rs (ported from kernel/k-loader.c)
+// kloader.rs
 //
 //    Load a weensy application into memory from the boot image.
 
@@ -8,27 +8,10 @@ use crate::vm::{kernel_pagetable, set_pagetable, virtual_memory_lookup, virtual_
 use crate::x86_64::{PAGESIZE, PTE_P, PTE_U, PTE_W};
 use weensyos_shared::{cpos, console_printf};
 
-// palloc(pid)
-//    Given (kernel/k-vm.o, no source available): allocates a page from
-//    pageinfo and returns its physical address, or null on failure. This
-//    is Project 5's own physical-page allocator -- this final project
-//    builds on a *complete* Project 5, so program_load_segment below
-//    calls it directly instead of identity-mapping `addr` the way an
-//    unsolved Project-5 starter would.
 extern "C" {
     fn palloc(pid: i32) -> *mut u8;
 }
 
-// The build embeds each compiled test program's binary directly into the
-// kernel image (see the GNUmakefile's `-b binary` link step). `objcopy`
-// does this by turning the program's binary file into an object file the
-// linker can attach to the kernel, and it automatically names the start
-// of that data `_binary_obj_p_*_start`. Each symbol below is just
-// "the address where one program's raw ELF bytes begin in memory."
-//
-// `objcopy` also emits a matching `_binary_obj_p_*_end` symbol, but
-// nothing uses it: `program_load` figures out each program's size
-// from the ELF header's own fields, not from `_end`.
 extern "C" {
     static _binary_obj_p_allocator_start: u8;
     static _binary_obj_p_malloc_start: u8;
@@ -52,20 +35,10 @@ unsafe fn ramimages() -> [RamImage; 4] {
 // program_load(p, programnumber)
 //    Load the code corresponding to program `programnumber` into the process
 //    `p` and set `p->p_registers.reg_rip` to its entry point. Calls
-//    `palloc` as required. Returns 0 on success and -1 on failure (e.g.
-//    out-of-memory).
-//
-//    (The reference k-loader.c also threads an `allocator` callback through
-//    this function and program_load_segment below, for a page-allocation
-//    strategy no step of this pset ever actually supplies -- it's always
-//    NULL. It's dropped here rather than carried around unused -- safe
-//    even though kernel/k-vm.o's process_load still calls this as if it
-//    took a 3rd argument, since on x86-64 SysV a callee simply ignores
-//    whatever's in the register/stack slot for a parameter it doesn't
-//    declare.)
-//
-//    `#[no_mangle] extern "C"`: kernel/k-vm.o (precompiled, no source
-// available -- see kernel.rs) calls this by its plain C symbol name.
+//    `assign_physical_page` to as required. Returns 0 on success and
+//    -1 on failure (e.g. out-of-memory). `allocator` is passed to
+//    `virtual_memory_map`.
+
 #[no_mangle]
 pub unsafe extern "C" fn program_load(p: &mut Proc, programnumber: i32) -> i32 {
     // is this a valid program?
@@ -88,10 +61,8 @@ pub unsafe extern "C" fn program_load(p: &mut Proc, programnumber: i32) -> i32 {
 
     // set the entry point from the ELF header
     p.p_registers.reg_rip = (*eh).e_entry;
-
-    // TODO: this is where the heap's starting break gets computed, once
-    // you know the highest address any loaded segment reaches (see the
-    // assignment spec's Part 1, "The initial location of the break").
+    
+    // TODO
     0
 }
 
@@ -131,10 +102,6 @@ unsafe fn program_load_segment(p: &mut Proc, ph: &ElfProgram, src: *const u8) ->
     // restore kernel pagetable
     set_pagetable(kernel_pagetable);
 
-    // A segment the process may never write to (like .text) can be
-    // shared between processes by fork(), instead of copied, once it's
-    // mapped read-only -- drop PTE_W now that the segment's data has
-    // been copied in.
     if !writable {
         let mut addr = va;
         while addr < end_mem {
@@ -143,7 +110,6 @@ unsafe fn program_load_segment(p: &mut Proc, ph: &ElfProgram, src: *const u8) ->
             addr += PAGESIZE;
         }
     }
-    // (Heap-start/break setup lives in program_load, once, after every
-    // segment of the program has been loaded -- not here per-segment.)
+
     0
 }

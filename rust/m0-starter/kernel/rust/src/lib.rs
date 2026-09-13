@@ -1,14 +1,3 @@
-// lib.rs
-//
-//    To write an operating system kernel, we need code that does not depend
-//    on any operating system features: no threads, files, heap memory, the
-//    network, or other OS/libc abstractions. This crate is `no_std` for
-//    exactly that reason.
-//
-//    This crate builds as a `staticlib` (see Cargo.toml); the GNUmakefile
-//    links the resulting object files together with k-exception.S, boot.c,
-//    and bootstart.S using the link/ scripts.
-
 #![no_std]
 #![no_main]
 #![feature(panic_info_message)]

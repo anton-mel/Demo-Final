@@ -1,15 +1,3 @@
-// p-test.rs (ported from uspace/p-test.c -- a stand-in for whichever
-// program `make test-NAME` copies in)
-//
-//    Calls calloc with every (i, j) size pair from 1x1 to 63x63,
-//    checking the result is zeroed and non-null, freeing it, and
-//    defragmenting after each row. Run via boot command "test" or by
-//    pressing 't' once WeensyOS is running.
-//
-//    Initially (before uspace/malloc is implemented) `calloc` always
-//    returns `None`, so the first `.expect(...)` below panics
-//    immediately -- matching the reference starter's own behavior of
-//    failing an assertion right away.
 #![no_std]
 #![no_main]
 

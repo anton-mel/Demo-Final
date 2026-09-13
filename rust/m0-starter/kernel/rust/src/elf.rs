@@ -1,4 +1,4 @@
-// elf.rs (ported from shared/elf.h)
+// elf.rs
 //
 //   Structures and constants for ELF (Executable Linking Format) executable
 //   files.
