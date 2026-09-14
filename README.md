@@ -1,5 +1,7 @@
 # WeensyOS Final Project
 
+The implementation is not ideal. We still require pointer arithmetic and header + payload handling, so students will still be writing a lot of unsafe code. If necessary, we can keep the final project in C (using the original release) while having the rest of the problem set in Rust, since they do not depend on each other and starter code is provided.
+
 ## Starter
 ```rust
 #![no_std]
